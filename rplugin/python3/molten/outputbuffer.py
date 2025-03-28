@@ -38,6 +38,7 @@ class OutputBuffer:
         self.display_virt_lines = None
         self.extmark_namespace = extmark_namespace
         self.virt_text_id = None
+        self.status_id = None
         self.displayed_status = OutputStatus.HOLD
 
         self.options = options
@@ -55,14 +56,16 @@ class OutputBuffer:
 
         match output.status:
             case OutputStatus.HOLD:
-                status = "* On Hold"
+                # status = "* On Hold"
+                status = "󱥸"
             case OutputStatus.DONE:
                 if output.success:
-                    status = "✓ Done"
+                    status = "✓"
                 else:
-                    status = "✗ Failed"
+                    status = "✗"
             case OutputStatus.RUNNING:
-                status = "... Running"
+                # status = "... Running"
+                status = "󱥸"
             case OutputStatus.NEW:
                 status = ""
             case _:
@@ -102,7 +105,8 @@ class OutputBuffer:
         if output.status == OutputStatus.NEW:
             return f"Out[_]: Never Run"
         else:
-            return f"{old}Out[{execution_count}]: {status} {time}".rstrip()
+            # return f"{old}Out[{execution_count}]: {status} {time}".rstrip()
+            return status
 
     def enter(self, anchor: Position) -> bool:
         entered = False
@@ -142,6 +146,8 @@ class OutputBuffer:
     def clear_virt_output(self, bufnr: int) -> None:
         if self.virt_text_id is not None:
             self.nvim.funcs.nvim_buf_del_extmark(bufnr, self.extmark_namespace, self.virt_text_id)
+        if self.status_id is not None:
+            self.nvim.funcs.nvim_buf_del_extmark(bufnr, self.extmark_namespace, self.status_id)
         # clear the image too
         redraw = False
         for chunk in self.output.chunks:
@@ -199,7 +205,7 @@ class OutputBuffer:
         while len(lines) > 0 and lines[-1] == "":
             lines.pop()
 
-        lines.insert(0, self._get_header_text(self.output))
+        # lines.insert(0, self._get_header_text(self.output))
         return lines, len(lines) - 1 + virtual_lines
 
     def show_virtual_output(self, anchor: Position) -> None:
@@ -216,6 +222,11 @@ class OutputBuffer:
                 anchor.bufno, self.extmark_namespace, self.virt_text_id
             )
             self.virt_text_id = None
+        if self.status_id is not None:
+            self.nvim.funcs.nvim_buf_del_extmark(
+                anchor.bufno, self.extmark_namespace, self.status_id
+            )
+            self.status_id = None
 
         win = self.nvim.current.window
         win_info = self.nvim.funcs.getwininfo(win.handle)[0]
@@ -238,19 +249,51 @@ class OutputBuffer:
             win_height,
         )
         lines, _ = self.build_output_text(shape, anchor.bufno, True)
+
         l = len(lines)
+
         if l > self.options.virt_text_max_lines:
             lines = lines[: self.options.virt_text_max_lines - 1]
             lines.append(f"󰁅 {l - self.options.virt_text_max_lines + 1} More Lines ")
 
-        self.virt_text_id = buf.api.set_extmark(
-            self.extmark_namespace,
-            win_row,
-            0,
-            {
-                "virt_lines": [[(line, self.options.hl.virtual_text)] for line in lines],
-            },
-        )
+        if self.output.status in [OutputStatus.HOLD, OutputStatus.RUNNING]:
+            self.status_id = buf.api.set_extmark(
+                self.extmark_namespace,
+                win_row,
+                0,
+                {
+                    "virt_text": [("󱥸", self.options.hl.virtual_text)],
+                },
+            )
+        elif self.output.status == OutputStatus.DONE:
+            if len(lines) == 1: 
+                self.virt_text_id = buf.api.set_extmark(
+                    self.extmark_namespace,
+                    win_row,
+                    0,
+                    {
+                        "virt_text": [(lines[0], self.options.hl.virtual_text)],
+                    },
+                )
+            else:
+                status = "✓" if self.output.success else "✗"
+                self.status_id = buf.api.set_extmark(
+                    self.extmark_namespace,
+                    win_row,
+                    0,
+                    {
+                        "virt_text": [(status, self.options.hl.virtual_text)],
+                    },
+                )
+                self.virt_text_id = buf.api.set_extmark(
+                    self.extmark_namespace,
+                    win_row,
+                    0,
+                    {
+                        "virt_lines": [[(line, self.options.hl.virtual_text)] for line in lines],
+                    },
+                )
+
         self.canvas.present()
 
     def calculate_offset(self, anchor: Position) -> int:
